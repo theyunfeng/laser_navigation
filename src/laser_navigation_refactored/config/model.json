@@ -1,0 +1,4 @@
+{
+    "agvType": "DiffDrive",
+    "description": "AGV底盘类型配置，可选值: 4WIS4WID(四转四驱) 或 DiffDrive(双轮差速)"
+}

@@ -1,0 +1,42 @@
+{
+    "description": "导航模块参数配置文件",
+    
+    "topics": {
+        "slam_pose_topic": "slam_pose",
+        "odom_topic": "odom",
+        "description": "slam_pose_topic: 激光SLAM位姿（必须），odom_topic: 里程计速度反馈（可选）"
+    },
+    
+    "control_frequency": 25.0,
+    "use_odom_feedback": true,
+    "odom_timeout": 0.2,
+    
+    "motion_constraints": {
+        "max_velocity": 0.5,
+        "max_angular_velocity": 0.8,
+        "max_acceleration": 0.2,
+        "max_angular_acceleration": 0.8,
+        "max_lateral_velocity": 0.3,
+        "max_lateral_acceleration": 0.2,
+        "reach_distance": 0.02,
+        "reach_angle": 0.02
+    },
+    
+    "lqr_params": {
+        "description": "直线段LQR控制器参数",
+        "q1": 10.0,
+        "q2": 10.0,
+        "q3": 10.0,
+        "r1": 1.0,
+        "r2": 1.0
+    },
+    
+    "bezier_lqr_params": {
+        "description": "贝塞尔曲线段LQR控制器参数",
+        "q1": 0.5,
+        "q2": 0.5,
+        "q3": 0.005,
+        "r1": 1.0,
+        "r2": 1.0
+    }
+}
