@@ -409,6 +409,16 @@ private:
         odom_vel.linear_y = msg->twist.twist.linear.y;  // 四转四驱使用
         odom_vel.angular = msg->twist.twist.angular.z;
         
+        laser_navigation::Pose2D odom_pose;
+        odom_pose.x = msg->pose.pose.position.x;
+        odom_pose.y = msg->pose.pose.position.y;
+        odom_pose.yaw = laser_navigation::math::MathUtils::quaternionToYaw(
+            msg->pose.pose.orientation.x,
+            msg->pose.pose.orientation.y,
+            msg->pose.pose.orientation.z,
+            msg->pose.pose.orientation.w);
+        
+        
         double timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
         
         // 更新里程计速度反馈（位姿使用SLAM的current_pose_）

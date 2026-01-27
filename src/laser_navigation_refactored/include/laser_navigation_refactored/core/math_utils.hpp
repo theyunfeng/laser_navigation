@@ -176,6 +176,16 @@ public:
     static double dot2D(double ax, double ay, double bx, double by) {
         return ax * bx + ay * by;
     }
+
+    /**
+     * @brief 四元数转欧拉角（yaw）rad
+     */
+    static double quaternionToYaw(double qx, double qy, double qz, double qw) {
+        // yaw (z-axis rotation)
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        return std::atan2(siny_cosp, cosy_cosp);
+    }
 };
 
 }  // namespace math
