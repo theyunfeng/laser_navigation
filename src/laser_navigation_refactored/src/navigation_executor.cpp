@@ -56,6 +56,7 @@ int NavigationExecutor::initialize(const NavigationConfig& config,
     }
 
     // 保存配置
+    waypoints_.clear();
     waypoints_ = config.waypoints;
     adjust_start_angle_ = config.adjust_start_angle;
     adjust_end_angle_ = config.adjust_end_angle;
@@ -768,7 +769,7 @@ Velocity NavigationExecutor::smoothVelocityTransition(const Velocity& target_vel
     }
     
     // 平滑 vy（仅四转四驱）
-    if (chassis_type_ == ChassisType::kSwerve4WIS4WID) {
+    if (chassis_type_ == ChassisType::k4WIS4WID) {
         double delta_vy = target_velocity.linear_y - current_velocity.linear_y;
         if (std::abs(delta_vy) > max_delta) {
             smoothed.linear_y = current_velocity.linear_y + 
@@ -841,12 +842,14 @@ NavigationOutput NavigationExecutor::executeWithOdometry(const Pose2D& current_p
         stop_velocity_ = std::sqrt(
             last_control_velocity_.linear_x * last_control_velocity_.linear_x +
             last_control_velocity_.linear_y * last_control_velocity_.linear_y);
-        is_stopped_ = true;
+        is_stopped_ = true;//TODO 这里可能需要区分急停和障碍物停 
         stop_reason_ = StopReason::kObstacle;
-        
+    
         state_machine_.processEvent(StateMachineEvent::kObstacleDetected);
+
     } else if (!obstacle_stop && last_obstacle_stop_) {
         // 障碍物清除，检查位置偏移并决定恢复策略
+        //TODO 障碍物清楚要更新事件
         RecoveryStrategy strategy = resumeFromStop(current_pose);
         output.recovery_strategy = strategy;
         output.is_recovering = true;
@@ -869,12 +872,12 @@ NavigationOutput NavigationExecutor::executeWithOdometry(const Pose2D& current_p
 
         case StateMachineState::kDecelerating:
             output.velocity = decelerateStop(obstacle_deceleration, obstacle_deceleration);
-            output.status = NavigationStatus::kObstaclePaused;
+            output.status = NavigationStatus::kObstaclePaused;// TODO 这里要注意，cancel / 急停/障碍物停时减速到0如何告诉更新状态？
             break;
 
         case StateMachineState::kPaused:
             output.velocity = Velocity(0, 0, 0);
-            output.status = NavigationStatus::kObstaclePaused;
+            output.status = NavigationStatus::kObstaclePaused;//TODO 有可能是急停，根据stop_reason_区分
             break;
 
         case StateMachineState::kCompleted:
@@ -1180,6 +1183,7 @@ NavigationOutput NavigationExecutor::trackBezierSegment(const Pose2D& current_po
     double w_ref = (bezier_ref_heading_ - target_heading_) / control_period_;
     target_heading_ = bezier_ref_heading_;
 
+    // TODO 考虑后续加入四转四驱底盘的横向速度控制
     Velocity ref_vel(v_planned, 0, w_ref);
     output.reference_velocity = ref_vel;
 
@@ -1452,7 +1456,7 @@ Velocity NavigationExecutor::decelerateStop(double linear_decel, double angular_
     }
 
     // y方向线速度减速（仅四转四驱）
-    if (chassis_type_ == ChassisType::kSwerve4WIS4WID) {
+    if (chassis_type_ == ChassisType::k4WIS4WID) {
         if (std::abs(last_control_velocity_.linear_y) > 0.001) {
             int sign = math::MathUtils::sign(last_control_velocity_.linear_y);
             result.linear_y = last_control_velocity_.linear_y - sign * linear_decel * control_period_;

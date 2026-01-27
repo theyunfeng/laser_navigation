@@ -81,6 +81,8 @@
 #include <vector>
 #include <functional>
 
+#include "common/env.h"
+
 namespace laser_navigation {
 
 /**
@@ -88,6 +90,8 @@ namespace laser_navigation {
  */
 struct NavigationTask {
     std::string task_id;                        ///< 任务ID
+    std::string task_type;                      ///< 任务类型(必选)
+    int         task_update_id;                 ///< 任务更新ID（暂时未使用，只发布）
     std::vector<Pose2D> waypoints;              ///< 路径点（起点+过渡点+终点）
     std::vector<MotionConstraints> constraints; ///< 每段边的约束
     std::vector<PathSegmentType> segment_types; ///< 每段的类型
@@ -95,6 +99,8 @@ struct NavigationTask {
     bool start_angle_adjust{true};              ///< 是否调整起点角度
     bool end_angle_adjust{true};                ///< 是否调整终点角度
     ChassisType chassis_type{ChassisType::kDifferential}; ///< 底盘类型
+
+    std::string codes = "";                        ///< 二维码信息（可选）
     
     /// 贝塞尔控制点自动生成选项
     bool auto_generate_control_points{true};    ///< 是否自动生成缺失的控制点
@@ -151,7 +157,16 @@ public:
      * @return 解析结果，失败返回 nullopt
      */
     Optional<NavigationTask> parseTask(const nlohmann::json& json_obj);
-    
+
+    /**
+     * @brief 二维码导航相关
+     */
+    //TODO 实现解析二维码codes参数 parseCodes
+    bool parseCodes(const nlohmann::json& jsonObj, 
+                    const std::string& taskId ,
+                    std::string& msgOut);
+
+
     /**
      * @brief 解析热更新任务（追加路径点）
      * @param json_str JSON字符串
@@ -198,6 +213,15 @@ private:
     bool parseTrajectory(const nlohmann::json& traj_obj,
                          PathSegmentType& type,
                          std::vector<Pose2D>& ctrl_points);
+    /**
+     * @brief 解析taskParameters 起始点是否调整角度和终点是否调整角度
+     */
+    bool parseTaskParameters(const nlohmann::json& json_obj,
+                             bool& start_angle_adjust,
+                             bool& end_angle_adjust);
+
+    
+    
     
     /**
      * @brief 输出日志
@@ -243,11 +267,36 @@ inline Optional<NavigationTask> JsonParser::parseTask(const nlohmann::json& json
     NavigationTask task;
     
     try {
-        // 解析taskId（可选）
+        // 解析taskId（必选）
         if (json_obj.contains("taskId")) {
             task.task_id = json_obj["taskId"].get<std::string>();
+        }else{
+            setError("Missing 'taskId' field");
+            return nullopt;
+        }
+
+        //解析 taskType（必选）
+        if (json_obj.contains("taskType")) {
+            task.task_type = json_obj["taskType"].get<std::string>();
+        } else {
+            setError("Missing 'taskType' field");
+            return nullopt;
+        }
+
+        //解析 taskUpdateId（可选，默认为0）
+        if (json_obj.contains("taskUpdateId")) {
+            task.task_update_id = json_obj["taskUpdateId"].get<int>();
+        } else {
+            task.task_update_id = 0; // 默认值
         }
         
+        if(task.task_type != "START" && task.task_type != "UPDATE"){
+            // 如果不是导航任务也不是更新任务，则不需要后面的导航路径，直接返回
+            // TODO 加log4cplus日志
+            log("Task type is neither 'START' nor 'UPDATE', skipping path parsing.");
+            return task;
+        }
+
         // 解析nodes（必需）
         if (!parseNodes(json_obj, task.waypoints)) {
             return nullopt;
@@ -265,12 +314,16 @@ inline Optional<NavigationTask> JsonParser::parseTask(const nlohmann::json& json
             return nullopt;
         }
         
+        
         // 解析角度调整选项
-        if (json_obj.contains("startAngleAdjust")) {
-            task.start_angle_adjust = json_obj["startAngleAdjust"].get<bool>();
+        if (!parseTaskParameters(json_obj, 
+                                 task.start_angle_adjust, 
+                                 task.end_angle_adjust)) {
+            return nullopt;
         }
-        if (json_obj.contains("endAngleAdjust")) {
-            task.end_angle_adjust = json_obj["endAngleAdjust"].get<bool>();
+
+        if (!parseCodes(json_obj, "123", task.codes)) {
+            return nullopt;
         }
         
         // 解析控制点自动生成选项
@@ -287,17 +340,7 @@ inline Optional<NavigationTask> JsonParser::parseTask(const nlohmann::json& json
         
         // 解析底盘类型（默认为差速模型）
         task.chassis_type = ChassisType::kDifferential;  // 默认差速
-        if (json_obj.contains("chassisType")) {
-            std::string type_str = json_obj["chassisType"].get<std::string>();
-            if (type_str == "swerve" || type_str == "4wis4wid" || type_str == "Swerve") {
-                task.chassis_type = ChassisType::kSwerve4WIS4WID;
-                log("Chassis type: Swerve (4WIS4WID)");
-            } else {
-                log("Chassis type: Differential (default)");
-            }
-        } else {
-            log("Chassis type not specified, using Differential (default)");
-        }
+        
         
         log("Parsed task with " + std::to_string(task.waypoints.size()) + 
             " waypoints (" + std::to_string(task.getTransitionPointCount()) + 
@@ -336,22 +379,19 @@ inline bool JsonParser::parseNodes(const nlohmann::json& json_obj,
         const auto& node = nodes[i];
         
         // x和y是必需的
-        if (!node.contains("x") || !node.contains("y")) {
-            setError("Node " + std::to_string(i) + " missing x or y");
+        if (!node.contains("x") || !node.contains("y") || !node.contains("nodeId")) {
+            setError("Node " + std::to_string(i) + " missing x or y  or nodeId");
             return false;
         }
         
         Pose2D pose;
         pose.x = node["x"].get<double>();
         pose.y = node["y"].get<double>();
-        
-        // theta/yaw是可选的
+        pose.node_id = node["nodeId"].get<std::string>();
+
+        // theta是可选的，默认0.0
         if (node.contains("theta")) {
             pose.yaw = node["theta"].get<double>();
-        } else if (node.contains("yaw")) {
-            pose.yaw = node["yaw"].get<double>();
-        } else {
-            pose.yaw = 0.0;
         }
         
         waypoints.push_back(pose);
@@ -383,13 +423,35 @@ inline bool JsonParser::parseEdges(const nlohmann::json& json_obj,
         setError("'edges' must be an array");
         return false;
     }
+
+    if( edges.size() != num_edges ){
+        setError("'edges' size does not match number of segments");
+        return false;
+    }
     
     // 解析每条边
     // 注意：edges可能不是按顺序的，需要通过startNodeId/endNodeId匹配
     // 简化处理：假设edges按顺序排列
     for (size_t i = 0; i < edges.size() && i < num_edges; ++i) {
         const auto& edge = edges[i];
+        const auto& start_node = waypoints[i];
+        const auto& end_node = waypoints[i + 1];
         MotionConstraints& cons = constraints[i];
+
+        if( edge.contains("startNodeId") ){
+            std::string start_id = edge["startNodeId"].get<std::string>();
+            if( start_id != start_node.node_id ){
+                setError("Edge " + std::to_string(i) + " startNodeId does not match waypoint");
+                return false;
+            }
+        }
+        if( edge.contains("endNodeId") ){
+            std::string end_id = edge["endNodeId"].get<std::string>();
+            if( end_id != end_node.node_id ){
+                setError("Edge " + std::to_string(i) + " endNodeId does not match waypoint");
+                return false;
+            }
+        }
         
         // 解析方向
         if (edge.contains("direction")) {
@@ -428,6 +490,23 @@ inline bool JsonParser::parseEdges(const nlohmann::json& json_obj,
         }
         if (edge.contains("reachAngle")) {
             cons.reach_angle = edge["reachAngle"].get<double>();
+        }
+
+        //停障相关
+        if (edge.contains("obsStopDist")){
+            cons.obstacle_stop_distance = edge["obsStopDist"].get<double>();
+        }
+        if (edge.contains("obsExpansion")){
+            cons.obs_expansion = edge["obsExpansion"].get<double>();
+        }
+        if (edge.contains("obsStopDec")){
+            cons.obs_stop_deceleration = edge["obsStopDec"].get<double>();
+        }
+        if (edge.contains("emgStopDist")){
+            cons.emergency_stop_distance = edge["emgStopDist"].get<double>();
+        }
+        if (edge.contains("emgStopDec")){
+            cons.emergency_stop_deceleration = edge["emgStopDec"].get<double>();
         }
         
         // 解析轨迹类型
@@ -599,6 +678,75 @@ inline bool JsonParser::parseTrajectory(const nlohmann::json& traj_obj,
     
     return true;
 }
+
+inline bool JsonParser::parseTaskParameters(const nlohmann::json& json_obj,
+                                            bool& start_angle_adjust,
+                                            bool& end_angle_adjust) {
+    // 如果没有edges字段，使用默认值
+    if (!json_obj.contains("taskParameters")) {
+        log("No 'taskParameters' field, using default constraints");
+        return true;
+    }
+
+    const auto& task_paras = json_obj["taskParameters"];
+
+   /// 解析起点角度调整
+    if (task_paras.contains("startAngleAdjust")) {
+        start_angle_adjust = task_paras["startAngleAdjust"].get<bool>();
+    } else {
+        start_angle_adjust = true;  // 默认调整
+    }
+    
+    // 解析终点角度调整
+    if (task_paras.contains("reachAngleAdjust")) {
+        end_angle_adjust = task_paras["reachAngleAdjust"].get<bool>();
+    } else {
+        end_angle_adjust = false;  // 默认调整
+    }
+    
+    return true;
+}
+
+inline bool JsonParser::parseCodes(const nlohmann::json& jsonObj, 
+                                    const std::string& taskId,
+                                    std::string& msgOut)
+{
+    try
+    {
+        if (!jsonObj.contains("codes"))
+        {
+            return true;
+        }
+        if (!jsonObj["codes"].is_array())
+        {
+            //LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getInstance("LaserNavNode"), "codes is not array");
+            return true;
+        }
+        if (jsonObj["codes"].empty())
+        {
+            return true;
+        }
+        nlohmann::json out;
+        out["taskId"] = taskId;
+        out["taskType"] = "setCodes";
+        out["taskParameters"]["codes"] = jsonObj["codes"];
+        msgOut = out.dump();
+
+    }
+    catch (const std::exception& e)
+    {
+        // 走到这里的都是字段类型不对，比如：float当成string下发
+       // LOG4CPLUS_ERROR_FMT(log4cplus::Logger::getInstance("LaserNavNode"), "invalid json: %s", e.what());
+        return false;
+    }
+
+    //m_pubSetCodes->publish(msgOut);
+    // TODO: 等待二维码节点更改完配置？
+    //usleep(10 * 4000);
+
+    return true;
+}
+
 
 }  // namespace laser_navigation
 

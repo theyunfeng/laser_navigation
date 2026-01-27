@@ -28,7 +28,7 @@ namespace laser_navigation {
  */
 enum class ChassisType {
     kDifferential,      ///< 差速底盘 (vx, ω)
-    kSwerve4WIS4WID     ///< 四转四驱底盘 (vx, vy, ω)
+    k4WIS4WID     ///< 四转四驱底盘 (vx, vy, ω)
 };
 
 //==============================================================================
@@ -39,10 +39,15 @@ enum class ChassisType {
  * @brief 2D位姿结构体
  */
 struct Pose2D {
-    double x{0.0};      ///< x坐标 (m)
-    double y{0.0};      ///< y坐标 (m)
-    double yaw{0.0};    ///< 航向角 (rad)
-    std::string node_id;  ///< 节点ID（可选）
+    double x{0.0};      ///< x坐标 (m)（必选）
+    double y{0.0};      ///< y坐标 (m)（必选）
+    double yaw{0.0};    ///< 航向角 (rad) （可选）
+    std::string node_id;  ///< 节点ID（必选）
+
+    //针对此对象是实时位姿时的附加信息
+    std::string mode; ///< 只辨认实时位姿来源，可能是激光slam位姿 二维码位姿 轮式里程计位姿（如停车点等，可选）
+    bool valid{true};  ///< 实时位姿是否有效（可选，默认有效）
+
 
     Pose2D() = default;
     Pose2D(double x_, double y_, double yaw_ = 0.0, const std::string& id = "")
@@ -223,7 +228,7 @@ struct OdometryFeedback {
 //==============================================================================
 
 /**
- * @brief 导航执行状态
+ * @brief 导航执行状态 通用于导航内外层
  * 
  * 对应原代码中的返回值: 0=正常行驶, 1=前进中, 2=后退中, 3=停障, 4=旋转, 5=到点, 6=取消
  */
@@ -237,7 +242,10 @@ enum class NavigationStatus {
     kCancelled = 6,      ///< 已取消
     kSegmentReached = 7, ///< 阶段点到达
     kEmergencyStopped = 8, ///< 紧急停止
-    kError = 9           ///< 错误
+    kError = 9,           ///< 错误
+    kTurnLeft = 10,        ///< 左转中
+    kTurnRight= 11,         ///< 右转中
+    kPaused = 12            ///< 暂停
 };
 
 /**
@@ -309,6 +317,12 @@ struct MotionConstraints {
     double reach_distance{0.01};      ///< 位置到达阈值 (m) - 对应 Line::reachDist
     double reach_angle{0.01};         ///< 角度到达阈值 (rad) - 对应 Line::reachAngle
 
+    // 停障相关
+    double obstacle_stop_distance{0.5};  ///< 停障区距离 (m)
+    double obs_expansion{0.1};            ///< 障碍物宽度 (m)
+    double obs_stop_deceleration{0.2};   ///< 停障减速度 (m/s^2) obsStopDec
+    double emergency_stop_distance{0.3}; ///< 急停区半径 (m)
+    double emergency_stop_deceleration{0.5}; ///< 急停减速度 (m/s^2)
     // 行驶方向
     bool is_forward{true};            ///< true=前进, false=后退 - 对应 Line::positive
 

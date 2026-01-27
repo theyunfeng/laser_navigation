@@ -144,9 +144,9 @@ Velocity StraightLQRController::compute(const Pose2D& current_pose,
         v_out = -std::abs(v_out);
     }
     
-    // 计算横向速度（仅四转四驱）
+    // 计算横向速度（仅四转四驱）//TODO 后续要优化为直接用LQR计算出 vx vy w
     double vy_out = 0.0;
-    if (chassis_type_ == ChassisType::kSwerve4WIS4WID) {
+    if (chassis_type_ == ChassisType::k4WIS4WID) {
         // 计算横向误差
         double lateral_error = computeLateralVelocity(
             (X_current - X_ref).head<2>().norm() * 
@@ -179,7 +179,7 @@ Velocity StraightLQRController::computeWithFeedback(const Pose2D& current_pose,
         base_velocity.angular = current_vel.angular + 
             smooth_factor * (base_velocity.angular - current_vel.angular);
         
-        if (chassis_type_ == ChassisType::kSwerve4WIS4WID) {
+        if (chassis_type_ == ChassisType::k4WIS4WID) {
             base_velocity.linear_y = current_vel.linear_y + 
                 smooth_factor * (base_velocity.linear_y - current_vel.linear_y);
         }
@@ -317,7 +317,7 @@ Velocity BezierLQRController::compute(const Pose2D& current_pose,
     
     // 计算横向速度（仅四转四驱）
     double vy_out = 0.0;
-    if (chassis_type_ == ChassisType::kSwerve4WIS4WID) {
+    if (chassis_type_ == ChassisType::k4WIS4WID) {
         // 计算横向误差和航向误差
         double lateral_error = (current_pose.y - reference_point(1)) * std::cos(reference_heading) -
                                (current_pose.x - reference_point(0)) * std::sin(reference_heading);
@@ -351,7 +351,7 @@ Velocity BezierLQRController::computeWithFeedback(const Pose2D& current_pose,
         base_velocity.angular = current_vel.angular + 
             smooth_factor * (base_velocity.angular - current_vel.angular);
         
-        if (chassis_type_ == ChassisType::kSwerve4WIS4WID) {
+        if (chassis_type_ == ChassisType::k4WIS4WID) {
             base_velocity.linear_y = current_vel.linear_y + 
                 smooth_factor * (base_velocity.linear_y - current_vel.linear_y);
         }

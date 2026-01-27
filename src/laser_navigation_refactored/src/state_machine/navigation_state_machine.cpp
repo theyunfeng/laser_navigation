@@ -78,6 +78,10 @@ bool NavigationStateMachine::processEvent(StateMachineEvent event) {
             if (event == StateMachineEvent::kObstacleCleared) {
                 // 障碍物消除，恢复路径跟踪
                 next_state = StateMachineState::kFollowingPath;
+            }else if ( event == StateMachineEvent::kResume ) {
+                // 恢复导航
+                next_state = StateMachineState::kFollowingPath;
+
             } else if (event == StateMachineEvent::kEmergencyStop) {
                 next_state = StateMachineState::kPaused;
             } else if (event == StateMachineEvent::kCancel) {
