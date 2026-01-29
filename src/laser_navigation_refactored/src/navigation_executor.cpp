@@ -798,21 +798,22 @@ Velocity NavigationExecutor::smoothVelocityTransition(const Velocity& target_vel
 // 执行控制
 //==============================================================================
 
-NavigationOutput NavigationExecutor::execute(const Pose2D& current_pose,
-                                              bool obstacle_stop,
-                                              double obstacle_deceleration,
-                                              bool cancel) {
+NavigationOutput NavigationExecutor::execute(const Pose2D& current_pose,InfoNavStatus& info_nav_status
+                                            //   bool obstacle_stop,
+                                            //   double obstacle_deceleration,
+                                            //   bool cancel
+                                            ) {
     // 不使用里程计反馈的版本
     use_odom_feedback_.store(false);
-    return executeWithOdometry(current_pose, obstacle_stop, obstacle_deceleration, 
-                               cancel, 0.0);
+    return executeWithOdometry(current_pose, info_nav_status, 0.0);
 }
 
-NavigationOutput NavigationExecutor::executeWithOdometry(const Pose2D& current_pose,
-                                                           bool obstacle_stop,
-                                                           double obstacle_deceleration,
-                                                           bool cancel,
+NavigationOutput NavigationExecutor::executeWithOdometry(const Pose2D& current_pose, InfoNavStatus& info_nav_status,
+                                                        //    bool obstacle_stop,
+                                                        //    double obstacle_deceleration,
+                                                        //    bool cancel,
                                                            double current_time) {
+    
     std::unique_lock<std::shared_mutex> path_lock(path_mutex_);
     NavigationOutput output;
     output.status = NavigationStatus::kIdle;
@@ -826,58 +827,45 @@ NavigationOutput NavigationExecutor::executeWithOdometry(const Pose2D& current_p
 
     // 检查里程计反馈有效性
     auto odom = getValidOdometryFeedback(current_time);
-    use_odom_feedback_.store(odom.has_value());
+
+    //确定要用轮速里程计反馈且有值才会为真
+    use_odom_feedback_.store(use_odom_feedback_.load() && odom.has_value());
     output.using_odom_feedback = use_odom_feedback_.load();
 
-    // 处理取消
-    if (cancel && !is_cancelled_) {
+    // 处理取消 希望到达就近站点停止
+    if (info_nav_status.cancel_requested_ && !is_cancelled_) {
         is_cancelled_ = true;
         state_machine_.processEvent(StateMachineEvent::kCancel);
     }
 
     // 处理障碍物状态变化
-    if (obstacle_stop && !last_obstacle_stop_) {
-        // 记录停止时的位姿和速度
-        stop_pose_ = current_pose;
-        stop_velocity_ = std::sqrt(
-            last_control_velocity_.linear_x * last_control_velocity_.linear_x +
-            last_control_velocity_.linear_y * last_control_velocity_.linear_y);
-        is_stopped_ = true;//TODO 这里可能需要区分急停和障碍物停 
-        stop_reason_ = StopReason::kObstacle;
+    ObstacleDetectedAndRecovery(current_pose, info_nav_status, output);
     
-        state_machine_.processEvent(StateMachineEvent::kObstacleDetected);
-
-    } else if (!obstacle_stop && last_obstacle_stop_) {
-        // 障碍物清除，检查位置偏移并决定恢复策略
-        //TODO 障碍物清楚要更新事件
-        RecoveryStrategy strategy = resumeFromStop(current_pose);
-        output.recovery_strategy = strategy;
-        output.is_recovering = true;
-    }
-    last_obstacle_stop_ = obstacle_stop;
 
     // 根据状态执行
-    switch (state_machine_.getCurrentState()) {//TODO 这里可以考虑传入output的引用而非副本
+    switch (state_machine_.getCurrentState()) {//TODO 这里可以考虑传入output的引用而非副本 //考虑是否增加除避障外其它需求
         case StateMachineState::kStartRotation:
-            output = handleStartRotation(current_pose, obstacle_stop, obstacle_deceleration);
+           // output = handleStartRotation(current_pose, info_nav_status.obstacle_detected_, );
             break;
 
         case StateMachineState::kFollowingPath:
-            output = handlePathFollowing(current_pose, obstacle_stop, obstacle_deceleration, cancel);
+            // TODO 这里实际上不再需要处理障碍物等情况，这些情况分离到kDecelerating状态下处理
+            //output = handlePathFollowing(current_pose, obstacle_stop, obstacle_deceleration, cancel);
             break;
 
         case StateMachineState::kEndRotation:
-            output = handleEndRotation(current_pose, obstacle_stop, obstacle_deceleration);
+            //output = handleEndRotation(current_pose, obstacle_stop, obstacle_deceleration);
             break;
 
         case StateMachineState::kDecelerating:
-            output.velocity = decelerateStop(obstacle_deceleration, obstacle_deceleration);
-            output.status = NavigationStatus::kObstaclePaused;// TODO 这里要注意，cancel / 急停/障碍物停时减速到0如何告诉更新状态？
+            //output.velocity = decelerateStop(obstacle_deceleration, obstacle_deceleration);
+            // TODO 这里要注意，障碍物停止 / 急停/ 手动停止 减速到0 根据 stopreason_ 来返回状态
+            output.status = NavigationStatus::kObstaclePaused;
             break;
 
         case StateMachineState::kPaused:
             output.velocity = Velocity(0, 0, 0);
-            output.status = NavigationStatus::kObstaclePaused;//TODO 有可能是急停，根据stop_reason_区分
+            output.status = NavigationStatus::kObstaclePaused;//TODO 有可能是急停，根据stop_reason_区分？
             break;
 
         case StateMachineState::kCompleted:
@@ -1477,6 +1465,101 @@ Velocity NavigationExecutor::decelerateStop(double linear_decel, double angular_
 
     last_control_velocity_ = result;
     return result;
+}
+
+std::pair<NavigationStatus, Velocity> NavigationExecutor::decelerateStop(double linear_decel, double angular_decel , Velocity current_velocity) {
+    Velocity result;
+    NavigationStatus status  = NavigationStatus::kRunning;
+
+    // x方向线速度减速
+    if (std::abs(current_velocity.linear_x) > 0.001) {
+        int sign = math::MathUtils::sign(current_velocity.linear_x);
+        result.linear_x = current_velocity.linear_x - sign * linear_decel * control_period_;
+        if (result.linear_x * sign < 0) {
+            result.linear_x = 0;
+        }
+    }
+
+    // y方向线速度减速（仅四转四驱）
+    if (chassis_type_ == ChassisType::k4WIS4WID) {
+        if (std::abs(current_velocity.linear_y) > 0.001) {
+            int sign = math::MathUtils::sign(current_velocity.linear_y);
+            result.linear_y = current_velocity.linear_y - sign * linear_decel * control_period_;
+            if (result.linear_y * sign < 0) {
+                result.linear_y = 0;
+            }
+        }
+    }
+
+    // 角速度减速
+    if (std::abs(current_velocity.angular) > 0.001) {
+        int sign = math::MathUtils::sign(current_velocity.angular);
+        result.angular = current_velocity.angular - sign * angular_decel * control_period_;
+        if (result.angular * sign < 0) {
+            result.angular = 0;
+        }
+    }
+    
+    if (std::abs(result.linear_x) < 0.001 &&
+        std::abs(result.linear_y) < 0.001 &&
+        std::abs(result.angular) < 0.001) {
+        status = NavigationStatus::kGoalReached;
+    }
+
+    return {status, result};
+}
+
+void NavigationExecutor::ObstacleDetectedAndRecovery(const Pose2D& current_pose, 
+                                                    InfoNavStatus& info_nav_status,
+                                                    NavigationOutput& output) {
+                                    
+    if (info_nav_status.obstacle_detected_!= InfoNavStatus::obstacleArea::NORMAL_REGION 
+        && !last_obstacle_stop_) {
+        // 记录停止时的位姿和速度
+        stop_pose_ = current_pose;
+        stop_velocity_ = std::sqrt(
+            last_control_velocity_.linear_x * last_control_velocity_.linear_x +
+            last_control_velocity_.linear_y * last_control_velocity_.linear_y);
+        is_stopped_ = true;
+        stop_reason_ = StopReason::kObstacle;//TODO 这里可能帮助区分急停和障碍物停 
+    
+        state_machine_.processEvent(StateMachineEvent::kObstacleDetected);
+
+    } else if (info_nav_status.obstacle_detected_ == InfoNavStatus::obstacleArea::NORMAL_REGION 
+                && last_obstacle_stop_) {
+        // 障碍物清除，检查位置偏移并决定恢复策略
+        //TODO 障碍物清除要更新事件
+        RecoveryStrategy strategy = resumeFromStop(current_pose);
+        output.recovery_strategy = strategy;
+        output.is_recovering = true;
+    }
+    last_obstacle_stop_ = info_nav_status.obstacle_detected_ == InfoNavStatus::obstacleArea::NORMAL_REGION 
+                            ? false : true;
+
+}
+
+void NavigationExecutor::EmergencyStopAndRecovery(const Pose2D& current_pose, 
+                                    InfoNavStatus& info_nav_status,
+                                    NavigationOutput& output){
+
+    if (info_nav_status.emergency_immediately_stop_ && !last_emergency_stop_) {
+        // 记录停止时的位姿和速度
+        stop_pose_ = current_pose;
+        stop_velocity_ = std::sqrt(
+            last_control_velocity_.linear_x * last_control_velocity_.linear_x +
+            last_control_velocity_.linear_y * last_control_velocity_.linear_y);
+        is_stopped_ = true;
+        stop_reason_ = StopReason::kEmergencyStop;
+
+        state_machine_.processEvent(StateMachineEvent::kEmergencyStop);//TODO 这里希望是以一个大的减速度停下
+    } else if (!info_nav_status.emergency_immediately_stop_ && last_emergency_stop_) {
+        // 急停解除，检查位置偏移并决定恢复策略
+        RecoveryStrategy strategy = resumeFromStop(current_pose);
+        output.recovery_strategy = strategy;
+        output.is_recovering = true;
+    }
+    last_emergency_stop_ = info_nav_status.emergency_immediately_stop_;
+
 }
 
 }  // namespace laser_navigation

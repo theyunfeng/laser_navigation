@@ -22,6 +22,8 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(nlohmann_json QUIET)
+find_package(log4cplus REQUIRED)
+
 
 # 如果系统没有安装 nlohmann_json，使用 FetchContent 获取
 if(NOT nlohmann_json_FOUND)
@@ -49,6 +51,7 @@ set(NAV_CORE_SOURCES
   src/path/bezier_segment.cpp
   src/path/arc_segment.cpp
   src/planner/s_curve_planner.cpp
+  src/planner/rotate.cpp
   src/controller/lqr_controller.cpp
   src/state_machine/navigation_state_machine.cpp
   src/navigation_executor.cpp
@@ -63,6 +66,7 @@ target_include_directories(nav_core_lib PUBLIC
 target_link_libraries(nav_core_lib PUBLIC
   Eigen3::Eigen
   nlohmann_json::nlohmann_json
+  log4cplus
 )
 # ament_target_dependencies(nav_core_lib
 #   rclcpp
@@ -78,13 +82,13 @@ target_link_libraries(nav_core_lib PUBLIC
 # ============================================================================
 # 示例节点
 # ============================================================================
-add_executable(navigation_example_node
-  src/example/navigation_example_node.cpp
+add_executable(navigation_refactored_node
+  src/example/navigation_refactored_node.cpp
 )
-target_link_libraries(navigation_example_node PRIVATE
+target_link_libraries(navigation_refactored_node PRIVATE
   nav_core_lib
 )
-# ament_target_dependencies(navigation_example_node
+# ament_target_dependencies(navigation_refactored_node
 #   rclcpp
 #   std_msgs
 #   nav_msgs
@@ -94,7 +98,7 @@ target_link_libraries(navigation_example_node PRIVATE
 #   tf2_ros
 #   tf2_geometry_msgs
 # )
-target_link_libraries(navigation_example_node PUBLIC
+target_link_libraries(navigation_refactored_node PUBLIC
   ${geometry_msgs_TARGETS}
   ${nav_msgs_TARGETS}
   ${sensor_msgs_TARGETS}
@@ -112,7 +116,7 @@ target_link_libraries(navigation_example_node PUBLIC
 # ============================================================================
 install(TARGETS
   nav_core_lib
-  navigation_example_node
+  navigation_refactored_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

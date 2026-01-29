@@ -320,9 +320,12 @@ struct MotionConstraints {
     // 停障相关
     double obstacle_stop_distance{0.5};  ///< 停障区距离 (m)
     double obs_expansion{0.1};            ///< 障碍物宽度 (m)
-    double obs_stop_deceleration{0.2};   ///< 停障减速度 (m/s^2) obsStopDec
-    double emergency_stop_distance{0.3}; ///< 急停区半径 (m)
-    double emergency_stop_deceleration{0.5}; ///< 急停减速度 (m/s^2)
+    double obs_stop_deceleration{0.5};   ///< 停障减速度 (m/s^2) obsStopDec
+    double obs_emergency_stop_distance{0.3}; ///< 急停区半径 (m)
+    double obs_emergency_stop_deceleration{1.0}; ///< 急停减速度 (m/s^2) 主要用于避障急停区的急停
+
+    //非避障急停
+    double emer_immediately_stop_deceleration{10.0}; ///< 非避障急停减速度 (m/s^2)
     // 行驶方向
     bool is_forward{true};            ///< true=前进, false=后退 - 对应 Line::positive
 
@@ -330,6 +333,10 @@ struct MotionConstraints {
     ChassisType chassis_type{ChassisType::kDifferential}; ///< 底盘类型
 
     MotionConstraints() = default;
+    static MotionConstraints& getInstance() {
+        static MotionConstraints instance;
+        return instance;
+    }
 };
 
 //==============================================================================
@@ -419,7 +426,8 @@ enum class StopReason {
     kNone,              ///< 无停止
     kObstacle,          ///< 障碍物停止
     kEmergencyStop,     ///< 急停按钮
-    kManualPause,       ///< 手动暂停
+    kManualPause,       ///< 手动暂停//可恢复导航任务
+    kManualStop,        ///< 手动停止 //要清空导航任务
     kError              ///< 错误停止
 };
 
@@ -489,6 +497,23 @@ struct WaypointInfo {
     WaypointInfo(const Pose2D& p, const MotionConstraints& c, 
                  PathSegmentType type = PathSegmentType::kStraight)
         : pose(p), constraints(c), segment_type(type) {}
+};
+
+/**
+ * @brief 导航避障、取消、急停、暂停、停止状态信息
+ */
+struct InfoNavStatus{
+    enum class obstacleArea{
+        NORMAL_REGION = 0,
+        DEC_STOP_REGION = 1,
+        EMER_STOP_REGION =2
+    };
+    obstacleArea obstacle_detected_{obstacleArea::NORMAL_REGION};//检测到避障，要减速停下，障碍物移除可以自动恢复导航
+    bool cancel_requested_{false}; //导航时取消任务，小车在前方最近站点停止，然后清空导航任务 //应当是一次性请求
+    bool emergency_immediately_stop_{false};//紧急停止，快速停下，默认减速度为10.0，急停取消可以自动恢复导航 //应当是一次性请求
+    bool taskPaused_{false}; // 导航时暂停任务，依据taskResumed_来恢复导航任务 //应当是一次性请求
+    bool taskStopped_{false};//最大减速度减速停止并清空导航任务 //应当是一次性请求
+    bool taskResumed_{false};// 恢复导航 //应当是一次性请求
 };
 
 }  // namespace laser_navigation

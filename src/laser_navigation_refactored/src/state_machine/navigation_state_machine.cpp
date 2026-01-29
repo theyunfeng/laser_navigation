@@ -95,7 +95,7 @@ bool NavigationStateMachine::processEvent(StateMachineEvent event) {
                 // 恢复导航
                 next_state = StateMachineState::kFollowingPath;
             } else if (event == StateMachineEvent::kCancel) {
-                // 在暂停状态取消，直接进入空闲
+                // 在暂停状态取消，直接进入空闲 ？ 万一没停下呢，除非这里表示已经完全停下
                 next_state = StateMachineState::kIdle;
             } else if (event == StateMachineEvent::kError) {
                 next_state = StateMachineState::kError;

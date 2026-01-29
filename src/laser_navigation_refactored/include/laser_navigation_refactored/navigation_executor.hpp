@@ -24,6 +24,13 @@
 #include "laser_navigation_refactored/state_machine/navigation_state_machine.hpp"
 #include "laser_navigation_refactored/core/optional.hpp"
 
+#include <log4cplus/logger.h>
+#include <log4cplus/configurator.h>
+#include <log4cplus/helpers/loglog.h>
+#include <log4cplus/helpers/fileinfo.h>
+#include <log4cplus/loggingmacros.h>
+#include <log4cplus/initializer.h>
+
 #include <vector>
 #include <memory>
 #include <functional>
@@ -279,34 +286,33 @@ public:
     /**
      * @brief 执行一个控制周期（不使用里程计反馈）
      * @param current_pose 当前位姿
-     * @param obstacle_stop 是否因障碍getPlannedVelocity物停止
-     * @param obstacle_deceleration 障碍物停止时的减速度
-     * @param cancel 是否取消导航
+     * @param info_nav_status 导航状态信息
      * @return 导航输出（速度指令和状态）
      * 
      * 对应原代码 Correct::cubicCurve 函数
      */
-    NavigationOutput execute(const Pose2D& current_pose,
-                             bool obstacle_stop,
-                             double obstacle_deceleration,
-                             bool cancel);
+    NavigationOutput execute(const Pose2D& current_pose, InfoNavStatus& info_nav_status
+                            //  bool obstacle_stop,
+                            //  double obstacle_deceleration,
+                            //  bool cancel
+                            );
 
     /**
      * @brief 执行一个控制周期（使用里程计反馈）
      * @param current_pose 当前位姿
-     * @param obstacle_stop 是否因障碍物停止
-     * @param obstacle_deceleration 障碍物停止时的减速度
-     * @param cancel 是否取消导航
+     * @param info_nav_status 导航状态信息
      * @param current_time 当前时间（用于检查里程计有效性）
      * @return 导航输出（速度指令和状态）
      * 
      * 此版本会自动使用之前通过 updateOdometryFeedback 提供的里程计数据
      */
-    NavigationOutput executeWithOdometry(const Pose2D& current_pose,
-                                          bool obstacle_stop,
-                                          double obstacle_deceleration,
-                                          bool cancel,
-                                          double current_time);
+    NavigationOutput executeWithOdometry(const Pose2D& current_pose,InfoNavStatus& info_nav_status,
+                                        //   bool obstacle_stop,
+                                        //   double obstacle_deceleration,
+                                        //   bool cancel,
+                                        //   
+                                            double current_time
+                                        );
 
     /**
      * @brief 取消导航
@@ -329,6 +335,15 @@ public:
      * 对应原代码 Correct::decelStop 函数
      */
     Velocity decelerateStop(double linear_decel, double angular_decel);
+
+    /**
+     * @brief 减速停止 非导航状态时使用
+     * @param linear_decel 线减速度
+     * @param angular_decel 角减速度
+     * @param current_velocity 当前速度
+     * @return 减速后的速度指令
+     */
+    std::pair<NavigationStatus,Velocity> decelerateStop(double linear_decel, double angular_decel , Velocity current_velocity);
 
     //==========================================================================
     // 状态查询
@@ -490,6 +505,25 @@ private:
     void log(const std::string& message);
 
     //==========================================================================
+    // 特殊情况处理
+    //==========================================================================
+
+    /**
+     * @brief 遇到障碍物及障碍物消失恢复导航
+     */
+
+    void ObstacleDetectedAndRecovery(const Pose2D& current_pose, 
+                                    InfoNavStatus& info_nav_status,
+                                    NavigationOutput& output);
+    
+    /**
+     * @brief 遇到紧急停止及取消紧急停止恢复导航
+     */
+    void EmergencyStopAndRecovery(const Pose2D& current_pose, 
+                                    InfoNavStatus& info_nav_status,
+                                    NavigationOutput& output);
+
+    //==========================================================================
     // 成员变量
     //==========================================================================
 
@@ -567,6 +601,7 @@ private:
     bool is_cancelled_{false};
     bool is_rotating_{false};
     bool last_obstacle_stop_{false};
+    bool last_emergency_stop_{false};
 
     // 回调
     LogCallback log_callback_;

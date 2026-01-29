@@ -97,7 +97,7 @@ struct NavigationTask {
     std::vector<PathSegmentType> segment_types; ///< 每段的类型
     std::vector<std::vector<Pose2D>> control_points; ///< 贝塞尔控制点
     bool start_angle_adjust{true};              ///< 是否调整起点角度
-    bool end_angle_adjust{true};                ///< 是否调整终点角度
+    bool end_angle_adjust{false};                ///< 是否调整终点角度
     ChassisType chassis_type{ChassisType::kDifferential}; ///< 底盘类型
 
     std::string codes = "";                        ///< 二维码信息（可选）
@@ -123,6 +123,37 @@ struct NavigationTask {
     /// 获取过渡点数量
     size_t getTransitionPointCount() const {
         return waypoints.size() > 2 ? waypoints.size() - 2 : 0;
+    }
+
+    /// 走过的路径和点删除
+    bool earsePassedPathAndPoints()
+    {
+        if( waypoints.empty() || constraints.empty() || segment_types.empty() )
+        {
+            return false;
+        }
+
+        waypoints.erase(waypoints.begin());
+        constraints.erase(constraints.begin());
+        segment_types.erase(segment_types.begin());
+        return true;
+    }
+
+    void clearTask()
+    {
+        task_id.clear();
+        task_type.clear();
+        task_update_id = 0;
+        waypoints.clear();
+        constraints.clear();
+        segment_types.clear();
+        control_points.clear();
+        start_angle_adjust = true;
+        end_angle_adjust = false;
+        //chassis_type = ChassisType::kDifferential;
+        codes.clear();
+        auto_generate_control_points = true;
+        control_point_extension_factor = 0.35;
     }
 };
 
@@ -503,10 +534,14 @@ inline bool JsonParser::parseEdges(const nlohmann::json& json_obj,
             cons.obs_stop_deceleration = edge["obsStopDec"].get<double>();
         }
         if (edge.contains("emgStopDist")){
-            cons.emergency_stop_distance = edge["emgStopDist"].get<double>();
+            cons.obs_emergency_stop_distance = edge["emgStopDist"].get<double>();
         }
         if (edge.contains("emgStopDec")){
-            cons.emergency_stop_deceleration = edge["emgStopDec"].get<double>();
+            cons.obs_emergency_stop_deceleration = edge["emgStopDec"].get<double>();
+        }
+
+        if (edge.contains("emgImStopDec")){
+            cons.emer_immediately_stop_deceleration = edge["emgImStopDec"].get<double>();
         }
         
         // 解析轨迹类型
